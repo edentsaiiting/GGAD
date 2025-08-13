@@ -62,10 +62,12 @@ Due to the Copyright of DGraph-Fin, you need to download from [DGraph-Fin](https
 If you use this package and find it useful, please cite our paper using the following BibTeX. Thanks! :)
 
 ```bibtex
-@inproceedings{qiao2024generative,
-  title={Generative Semi-supervised Graph Anomaly Detection},
+@article{qiao2024generative,
+  title={Generative semi-supervised graph anomaly detection},
   author={Qiao, Hezhe and Wen, Qingsong and Li, Xiaoli and Lim, Ee-Peng and Pang, Guansong},
-  booktitle={Advances in Neural Information Processing Systems},
+  journal={Advances in neural information processing systems},
+  volume={37},
+  pages={4660--4688},
   year={2024}
 }
 ```
