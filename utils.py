@@ -66,7 +66,7 @@ def dense_to_one_hot(labels_dense, num_classes):
 def load_mat(dataset, train_rate=0.3, val_rate=0.1):
 
     """Load .mat dataset."""
-    data = sio.loadmat("./dataset/{}.mat".format(dataset))
+    data = sio.loadmat("../../Dataset/T/{}.mat".format(dataset))
     label = data['Label'] if ('Label' in data) else data['gnd']
     attr = data['Attributes'] if ('Attributes' in data) else data['X']
     network = data['Network'] if ('Network' in data) else data['A']
