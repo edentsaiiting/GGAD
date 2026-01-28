@@ -100,8 +100,8 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1, ano_known_rate=0.023):
     print('Test', Counter(np.squeeze(ano_labels[idx_test])))
     # Sample some labeled normal nodes
     all_normal_label_idx = [i for i in idx_train if ano_labels[i] == 0]
-    # all_abnormal_label_idx = [i for i in idx_train if ano_labels[i] == 1]
-    all_abnormal_label_idx = []
+    all_abnormal_label_idx = [i for i in idx_train if ano_labels[i] == 1]
+    # all_abnormal_label_idx = []
     all_training_idx = all_normal_label_idx + all_abnormal_label_idx # Incoporating abnromal labels
     random.shuffle(all_training_idx)
     rate = 0.5  #  change train_rate to 0.3 0.5 0.6  0.8

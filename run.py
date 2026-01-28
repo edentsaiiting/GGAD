@@ -192,7 +192,7 @@ with tqdm(total=args.num_epoch) as pbar:
             normal_idx = [i for i in normal_label_idx if i not in all_abnormal_label_idx]
             real_abnormal_idx = [i for i in normal_label_idx if i in all_abnormal_label_idx]
             affinity_normal_mean = torch.mean(affinity[normal_idx])
-            affinity_abnormal_mean = torch.mean(affinity[abnormal_label_idx]) #+ torch.mean(affinity[real_abnormal_idx])
+            affinity_abnormal_mean = torch.mean(affinity[abnormal_label_idx]) + torch.mean(affinity[real_abnormal_idx])
 
             # if epoch % 10 == 0:
             #     real_abnormal_label_idx = np.array(all_idx)[np.argwhere(ano_label == 1).squeeze()].tolist()
