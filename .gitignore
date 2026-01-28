@@ -1,0 +1,3 @@
+src/pytorch_models/*.pkl
+data/*.npz
+data/dgraphfin_adj_list
