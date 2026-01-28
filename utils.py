@@ -63,10 +63,11 @@ def dense_to_one_hot(labels_dense, num_classes):
     return labels_one_hot
 
 
-def load_mat(dataset, train_rate=0.3, val_rate=0.1):
+def load_mat(dataset, train_rate=0.3, val_rate=0.1, ano_known_rate=0.023):
 
     """Load .mat dataset."""
-    data = sio.loadmat("./dataset/{}.mat".format(dataset))
+    # data = sio.loadmat("./dataset/{}.mat".format(dataset))
+    data = sio.loadmat("../../Dataset/T/{}.mat".format(dataset))
     label = data['Label'] if ('Label' in data) else data['gnd']
     attr = data['Attributes'] if ('Attributes' in data) else data['X']
     network = data['Network'] if ('Network' in data) else data['A']
@@ -99,8 +100,12 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1):
     print('Test', Counter(np.squeeze(ano_labels[idx_test])))
     # Sample some labeled normal nodes
     all_normal_label_idx = [i for i in idx_train if ano_labels[i] == 0]
+    # all_abnormal_label_idx = [i for i in idx_train if ano_labels[i] == 1]
+    all_abnormal_label_idx = []
+    all_training_idx = all_normal_label_idx + all_abnormal_label_idx # Incoporating abnromal labels
+    random.shuffle(all_training_idx)
     rate = 0.5  #  change train_rate to 0.3 0.5 0.6  0.8
-    normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * rate)]
+    normal_label_idx = all_training_idx[: int(len(all_training_idx) * rate)]
     print('Training rate', rate)
 
     # normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * 0.2)]
@@ -138,7 +143,7 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1):
         abnormal_label_idx = normal_label_idx[: int(len(normal_label_idx) * 0.05)]  
     else:
         abnormal_label_idx = normal_label_idx[: int(len(normal_label_idx) * 0.15)]  
-    return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, normal_label_idx, abnormal_label_idx
+    return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, normal_label_idx, abnormal_label_idx, all_abnormal_label_idx
 
 
 def adj_to_dgl_graph(adj):

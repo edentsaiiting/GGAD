@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import random
 import numpy as np
-from torch_geometric.nn import GCNConv
+# from torch_geometric.nn import GCNConv
 from sklearn.metrics import f1_score, accuracy_score, recall_score, roc_auc_score, average_precision_score, \
     confusion_matrix
 

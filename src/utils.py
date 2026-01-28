@@ -24,7 +24,7 @@ def load_data(data, prefix='data/'):
         labels = (labels == 1).int()
         labels = np.array(labels)
         feat_data = np.array(torch.tensor(f['x']).float())
-        with open(prefix + 'dgraphfin_adj_list', 'rb') as file:
+        with open('../data/' + 'dgraphfin_adj_list', 'rb') as file:
             homo = pickle.load(file)
         file.close()
 

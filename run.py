@@ -82,7 +82,7 @@ torch.backends.cudnn.benchmark = False
 
 # Load and preprocess data
 adj, features, labels, all_idx, idx_train, idx_val, \
-idx_test, ano_label, str_ano_label, attr_ano_label, normal_label_idx, abnormal_label_idx = load_mat(args.dataset)
+idx_test, ano_label, str_ano_label, attr_ano_label, normal_label_idx, abnormal_label_idx, all_abnormal_label_idx = load_mat(args.dataset)
 
 if args.dataset in ['Amazon', 'tf_finace', 'reddit', 'elliptic']:
     features, _ = preprocess_features(features)
@@ -142,99 +142,105 @@ xent = nn.CrossEntropyLoss()
 with tqdm(total=args.num_epoch) as pbar:
     pbar.set_description('Training')
     total_time = 0
-    for epoch in range(args.num_epoch):
-        start_time = time.time()
-        model.train()
-        optimiser.zero_grad()
+    with open("./log/" + args.dataset + str(args.num_epoch) + "_training_log.txt", "a") as f:
+        for epoch in range(args.num_epoch):
+            start_time = time.time()
+            model.train()
+            optimiser.zero_grad()
 
-        # Train model
-        train_flag = True
-        emb, emb_combine, logits, emb_con, emb_abnormal = model(features, adj,
-                                                                abnormal_label_idx, normal_label_idx,
-                                                                train_flag, args)
-        if epoch % 10 == 0:
-            # save data for tsne
-            pass
-
-            # tsne_data_path = 'draw/tfinance/tsne_data_{}.mat'.format(str(epoch))
-            # io.savemat(tsne_data_path, {'emb': np.array(emb.cpu().detach()), 'ano_label': ano_label,
-            #                             'abnormal_label_idx': np.array(abnormal_label_idx),
-            #                             'normal_label_idx': np.array(normal_label_idx)})
-
-        # BCE loss
-        lbl = torch.unsqueeze(torch.cat(
-            (torch.zeros(len(normal_label_idx)), torch.ones(len(emb_con)))),
-            1).unsqueeze(0)
-        # if torch.cuda.is_available():
-        #     lbl = lbl.cuda()
-
-        loss_bce = b_xent(logits, lbl)
-        loss_bce = torch.mean(loss_bce)
-
-        # Local affinity margin loss
-        emb = torch.squeeze(emb)
-
-        emb_inf = torch.norm(emb, dim=-1, keepdim=True)
-        emb_inf = torch.pow(emb_inf, -1)
-        emb_inf[torch.isinf(emb_inf)] = 0.
-        emb_norm = emb * emb_inf
-
-        sim_matrix = torch.mm(emb_norm, emb_norm.T)
-        raw_adj = torch.squeeze(raw_adj)
-        similar_matrix = sim_matrix * raw_adj
-
-        r_inv = torch.pow(torch.sum(raw_adj, 0), -1)
-        r_inv[torch.isinf(r_inv)] = 0.
-        affinity = torch.sum(similar_matrix, 0) * r_inv
-
-        affinity_normal_mean = torch.mean(affinity[normal_label_idx])
-        affinity_abnormal_mean = torch.mean(affinity[abnormal_label_idx])
-
-        # if epoch % 10 == 0:
-        #     real_abnormal_label_idx = np.array(all_idx)[np.argwhere(ano_label == 1).squeeze()].tolist()
-        #     real_normal_label_idx = np.array(all_idx)[np.argwhere(ano_label == 0).squeeze()].tolist()
-        #     overlap = list(set(real_abnormal_label_idx) & set(real_normal_label_idx))
-        #
-        #     real_affinity, index = torch.sort(affinity[real_abnormal_label_idx])
-        #     real_affinity = real_affinity[:300]
-        #     draw_pdf(np.array(affinity[real_normal_label_idx].detach().cpu()),
-        #              np.array(affinity[abnormal_label_idx].detach().cpu()),
-        #              np.array(real_affinity.detach().cpu()), args.dataset, epoch)
-
-        confidence_margin = 0.7
-        loss_margin = (confidence_margin - (affinity_normal_mean - affinity_abnormal_mean)).clamp_min(min=0)
-
-        diff_attribute = torch.pow(emb_con - emb_abnormal, 2)
-        loss_rec = torch.mean(torch.sqrt(torch.sum(diff_attribute, 1)))
-
-        loss = 1 * loss_margin + 1 * loss_bce + 1 * loss_rec
-
-        loss.backward()
-        optimiser.step()
-        end_time = time.time()
-        total_time += end_time - start_time
-        print('Total time is', total_time)
-        if epoch % 2 == 0:
-            logits = np.squeeze(logits.cpu().detach().numpy())
-            lbl = np.squeeze(lbl.cpu().detach().numpy())
-            auc = roc_auc_score(lbl, logits)
-            # print('Traininig {} AUC:{:.4f}'.format(args.dataset, auc))
-            # AP = average_precision_score(lbl, logits, average='macro', pos_label=1, sample_weight=None)
-            # print('Traininig AP:', AP)
-
-            print("Epoch:", '%04d' % (epoch), "train_loss_margin=", "{:.5f}".format(loss_margin.item()))
-            print("Epoch:", '%04d' % (epoch), "train_loss_bce=", "{:.5f}".format(loss_bce.item()))
-            print("Epoch:", '%04d' % (epoch), "rec_loss=", "{:.5f}".format(loss_rec.item()))
-            print("Epoch:", '%04d' % (epoch), "train_loss=", "{:.5f}".format(loss.item()))
-            print("=====================================================================")
-        if epoch % 10 == 0:
-            model.eval()
-            train_flag = False
-            emb, emb_combine, logits, emb_con, emb_abnormal = model(features, adj, abnormal_label_idx, normal_label_idx,
+            # Train model
+            train_flag = True
+            emb, emb_combine, logits, emb_con, emb_abnormal = model(features, adj,
+                                                                    abnormal_label_idx, normal_label_idx,
                                                                     train_flag, args)
-            # evaluation on the valid and test node
-            logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())
-            auc = roc_auc_score(ano_label[idx_test], logits)
-            print('Testing {} AUC:{:.4f}'.format(args.dataset, auc))
-            AP = average_precision_score(ano_label[idx_test], logits, average='macro', pos_label=1, sample_weight=None)
-            print('Testing AP:', AP)
+            if epoch % 10 == 0:
+                # save data for tsne
+                pass
+
+                # tsne_data_path = 'draw/tfinance/tsne_data_{}.mat'.format(str(epoch))
+                # io.savemat(tsne_data_path, {'emb': np.array(emb.cpu().detach()), 'ano_label': ano_label,
+                #                             'abnormal_label_idx': np.array(abnormal_label_idx),
+                #                             'normal_label_idx': np.array(normal_label_idx)})
+
+            # BCE loss
+            lbls = [1 if i in set(all_abnormal_label_idx) else 0 for i in normal_label_idx]
+            lbl = torch.unsqueeze(torch.cat(
+                (torch.tensor(lbls, dtype=torch.int64), torch.ones(len(emb_con)))),
+                1).unsqueeze(0)
+            # if torch.cuda.is_available():
+            #     lbl = lbl.cuda()
+
+            loss_bce = b_xent(logits, lbl)
+            loss_bce = torch.mean(loss_bce)
+
+            # Local affinity margin loss
+            emb = torch.squeeze(emb)
+
+            emb_inf = torch.norm(emb, dim=-1, keepdim=True)
+            emb_inf = torch.pow(emb_inf, -1)
+            emb_inf[torch.isinf(emb_inf)] = 0.
+            emb_norm = emb * emb_inf
+
+            sim_matrix = torch.mm(emb_norm, emb_norm.T)
+            raw_adj = torch.squeeze(raw_adj)
+            similar_matrix = sim_matrix * raw_adj
+
+            r_inv = torch.pow(torch.sum(raw_adj, 0), -1)
+            r_inv[torch.isinf(r_inv)] = 0.
+            affinity = torch.sum(similar_matrix, 0) * r_inv
+
+            normal_idx = [i for i in normal_label_idx if i not in all_abnormal_label_idx]
+            real_abnormal_idx = [i for i in normal_label_idx if i in all_abnormal_label_idx]
+            affinity_normal_mean = torch.mean(affinity[normal_idx])
+            affinity_abnormal_mean = torch.mean(affinity[abnormal_label_idx]) #+ torch.mean(affinity[real_abnormal_idx])
+
+            # if epoch % 10 == 0:
+            #     real_abnormal_label_idx = np.array(all_idx)[np.argwhere(ano_label == 1).squeeze()].tolist()
+            #     real_normal_label_idx = np.array(all_idx)[np.argwhere(ano_label == 0).squeeze()].tolist()
+            #     overlap = list(set(real_abnormal_label_idx) & set(real_normal_label_idx))
+            #
+            #     real_affinity, index = torch.sort(affinity[real_abnormal_label_idx])
+            #     real_affinity = real_affinity[:300]
+            #     draw_pdf(np.array(affinity[real_normal_label_idx].detach().cpu()),
+            #              np.array(affinity[abnormal_label_idx].detach().cpu()),
+            #              np.array(real_affinity.detach().cpu()), args.dataset, epoch)
+
+            confidence_margin = 0.7
+            loss_margin = (confidence_margin - (affinity_normal_mean - affinity_abnormal_mean)).clamp_min(min=0)
+
+            diff_attribute = torch.pow(emb_con - emb_abnormal, 2)
+            loss_rec = torch.mean(torch.sqrt(torch.sum(diff_attribute, 1)))
+            
+            loss = 1 * loss_margin + 1 * loss_bce + 1 * loss_rec
+
+            loss.backward()
+            optimiser.step()
+            end_time = time.time()
+            total_time += end_time - start_time
+            print('Total time is', total_time)
+            if epoch % 2 == 0:
+                logits = np.squeeze(logits.cpu().detach().numpy())
+                lbl = np.squeeze(lbl.cpu().detach().numpy())
+                auc = roc_auc_score(lbl, logits)
+                # print('Traininig {} AUC:{:.4f}'.format(args.dataset, auc))
+                # AP = average_precision_score(lbl, logits, average='macro', pos_label=1, sample_weight=None)
+                # print('Traininig AP:', AP)
+
+                print("Epoch:", '%04d' % (epoch), "train_loss_margin=", "{:.5f}".format(loss_margin.item()))
+                print("Epoch:", '%04d' % (epoch), "train_loss_bce=", "{:.5f}".format(loss_bce.item()))
+                print("Epoch:", '%04d' % (epoch), "rec_loss=", "{:.5f}".format(loss_rec.item()))
+                print("Epoch:", '%04d' % (epoch), "train_loss=", "{:.5f}".format(loss.item()))
+                print("=====================================================================")
+            if epoch % 10 == 0:
+                model.eval()
+                train_flag = False
+                emb, emb_combine, logits, emb_con, emb_abnormal = model(features, adj, abnormal_label_idx, normal_label_idx,
+                                                                        train_flag, args)
+                # evaluation on the valid and test node
+                logits = np.squeeze(logits[:, idx_test, :].cpu().detach().numpy())
+                auc = roc_auc_score(ano_label[idx_test], logits)
+                print('Testing {} AUC:{:.4f}'.format(args.dataset, auc))
+                AP = average_precision_score(ano_label[idx_test], logits, average='macro', pos_label=1, sample_weight=None)
+                print('Testing AP:', AP)
+
+            f.write(f'{loss_margin.item():.4f} {loss_bce.item():.4f} {loss_rec.item():.4f} {loss.item():.4f} {auc:.4f} {AP}\n')
