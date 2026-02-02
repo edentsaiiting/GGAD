@@ -39,7 +39,7 @@ optimizer: 'adam'
 lr: 0.001
 weight_decay: 0.007
 batch_size: 150
-num_epochs: 1500
+num_epochs: 500 #1500
 valid_epochs: 5
 alpha: 2
 

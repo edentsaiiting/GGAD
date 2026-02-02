@@ -72,6 +72,7 @@ def multi_run_main(config):
     print("F1-binary-0: {}+{}".format(f1_0_mean, f1_0_std))
     print("AUC: {}+{}".format(auc_mean, auc_std))
     print("G-Mean: {}+{}".format(gmean_mean, gmean_std))
+    f1.write(f'{f1_1_mean+f1_1_std:.4f} {f1_0_mean+f1_0_std:.4f} {auc_mean+auc_std:.4f} {gmean_mean+gmean_std:.4f}\n')
 
 
 
@@ -93,7 +94,7 @@ def get_config(config_path="config.yml"):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='dgraph.yml',  help="")
+    parser.add_argument("--config", type=str, default='src/dgraph.yml',  help="")
     parser.add_argument('--multi_run', action='store_true', help='flag: multi run')
     args = vars(parser.parse_args())
     return args
@@ -154,7 +155,8 @@ def grid(kwargs):
 if __name__ == '__main__':
     cfg = get_args()
     config = get_config(cfg['config'])
-    if cfg['multi_run']:
-        multi_run_main(config)
-    else:
-        main(config)
+    with open("./log/" + "dgraph500" + "_training_log.txt", "a") as f1:
+        if cfg['multi_run']:
+            multi_run_main(config)
+        else:
+            main(config)

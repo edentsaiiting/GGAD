@@ -19,7 +19,7 @@ def load_data(data, prefix='data/'):
 	"""
 
     if data == 'dgraphfin':
-        f = np.load('../data/dgraphfin.npz')
+        f = np.load('data/dgraphfin.npz')
         labels = torch.tensor(f['y']).float()
         labels = (labels == 1).int()
         labels = np.array(labels)
@@ -167,10 +167,10 @@ def test_recon(test_cases, labels, model, batch_size, test_attr, thres=0.5):
 
     auc_gnn = roc_auc_score(labels, np.array(gnn_prob_list))
     AP = average_precision_score(labels, np.array(gnn_prob_list), average='macro', pos_label=1, sample_weight=None)
-
-    print('Testing AUC', auc_gnn)
-    print('Testing AP:', AP)
-
+    with open("./log/" + "dgraph500" + "_test_log.txt", "a") as f2:
+        print('Testing AUC', auc_gnn)
+        print('Testing AP:', AP)
+        f2.write(f'{auc_gnn:.4f} {AP:.4f}\n')
 
 def test_aegis(test_cases, labels, model, batch_size, thres=0.5):
     """
@@ -240,10 +240,13 @@ def test_sage(test_cases, labels, model, batch_size, thres=0.5):
     tn, fp, fn, tp = conf_gnn.ravel()
     gmean_gnn = conf_gmean(conf_gnn)
 
-    print(f"   GNN F1-binary-1: {f1_binary_1_gnn:.4f}\tF1-binary-0: {f1_binary_0_gnn:.4f}" +
-          f"\tF1-macro: {f1_macro_gnn:.4f}\tG-Mean: {gmean_gnn:.4f}\tAUC: {auc_gnn:.4f}")
-    print('Testing AP:', AP)
-    print(f"   GNN TP: {tp}\tTN: {tn}\tFN: {fn}\tFP: {fp}")
+    with open('src/log/dgraph500_Test_sage.txt', 'a') as f3:
+        print(f"   GNN F1-binary-1: {f1_binary_1_gnn:.4f}\tF1-binary-0: {f1_binary_0_gnn:.4f}" +
+            f"\tF1-macro: {f1_macro_gnn:.4f}\tG-Mean: {gmean_gnn:.4f}\tAUC: {auc_gnn:.4f}")
+        print('Testing AP:', AP)
+        print(f"   GNN TP: {tp}\tTN: {tn}\tFN: {fn}\tFP: {fp}")
+        f3.write(f'{f1_binary_1_gnn:.4f} {f1_binary_0_gnn:.4f} {f1_macro_gnn:.4f} {gmean_gnn:.4f} {auc_gnn:.4f} {AP:.4f}\n')
+
     return f1_macro_gnn, f1_binary_1_gnn, f1_binary_0_gnn, auc_gnn, gmean_gnn
 
 
@@ -311,13 +314,13 @@ def test_ggad(test_cases, labels, model, batch_size, thres=0.5):
     conf_gnn = confusion_matrix(labels, np.array(gnn_pred_list))
     tn, fp, fn, tp = conf_gnn.ravel()
     gmean_gnn = conf_gmean(conf_gnn)
-
-    print(f"   GNN F1-binary-1: {f1_binary_1_gnn:.4f}\tF1-binary-0: {f1_binary_0_gnn:.4f}" +
-          f"\tF1-macro: {f1_macro_gnn:.4f}\tG-Mean: {gmean_gnn:.4f}\tAUC: {auc_gnn:.4f}")
-    print(f"   GNN TP: {tp}\tTN: {tn}\tFN: {fn}\tFP: {fp}")
-    print(f"Label1 F1: {f1_label1 / test_batch_num:.4f}\tAccuracy: {acc_label1 / test_batch_num:.4f}" +
-          f"\tRecall: {recall_label1 / test_batch_num:.4f}\tAUC: {auc_label1:.4f}\tAP: {ap_label1:.4f}")
-
+    with open("src/log/dgraph500_TestingGGAD.txt", "a") as f3:
+        print(f"   GNN F1-binary-1: {f1_binary_1_gnn:.4f}\tF1-binary-0: {f1_binary_0_gnn:.4f}" +
+            f"\tF1-macro: {f1_macro_gnn:.4f}\tG-Mean: {gmean_gnn:.4f}\tAUC: {auc_gnn:.4f}")
+        print(f"   GNN TP: {tp}\tTN: {tn}\tFN: {fn}\tFP: {fp}")
+        print(f"Label1 F1: {f1_label1 / test_batch_num:.4f}\tAccuracy: {acc_label1 / test_batch_num:.4f}" +
+            f"\tRecall: {recall_label1 / test_batch_num:.4f}\tAUC: {auc_label1:.4f}\tAP: {ap_label1:.4f}")
+        f3.wrtie(f'{f1_binary_1_gnn:.4f} {f1_binary_0_gnn:.4f} {f1_macro_gnn:.4f} {gmean_gnn:.4f} {auc_gnn:.4f} {f1_label1 / test_batch_num:.4f} {acc_label1 / test_batch_num:.4f} {recall_label1 / test_batch_num:.4f} {auc_label1:.4f}\tAP: {ap_label1:.4f}')
     return f1_macro_gnn, f1_binary_1_gnn, f1_binary_0_gnn, auc_gnn, gmean_gnn
 
 
