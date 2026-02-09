@@ -101,11 +101,16 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1, ano_known_rate=0.023):
     # Sample some labeled normal nodes
     all_normal_label_idx = [i for i in idx_train if ano_labels[i] == 0]
     all_abnormal_label_idx = [i for i in idx_train if ano_labels[i] == 1]
+    if int(len(all_abnormal_label_idx) * 0.05) <= 1:
+        clip_abnormal_idx = random.sample(all_abnormal_label_idx, 1) #Clip limited abnormal laebls
+    else:
+        clip_abnormal_idx = random.sample(all_abnormal_label_idx, int(len(all_abnormal_label_idx) * 0.0125)) #Clip limited abnormal laebls
     # all_abnormal_label_idx = []
-    all_training_idx = all_normal_label_idx + all_abnormal_label_idx # Incoporating abnromal labels
+    all_idx = all_normal_label_idx + all_abnormal_label_idx
+    all_training_idx = all_normal_label_idx + clip_abnormal_idx # Incoporating abnromal labels
     random.shuffle(all_training_idx)
     rate = 0.5  #  change train_rate to 0.3 0.5 0.6  0.8
-    normal_label_idx = all_training_idx[: int(len(all_training_idx) * rate)]
+    normal_label_idx = all_training_idx[: int(len(all_idx) * rate)]
     print('Training rate', rate)
 
     # normal_label_idx = all_normal_label_idx[: int(len(all_normal_label_idx) * 0.2)]
@@ -142,8 +147,9 @@ def load_mat(dataset, train_rate=0.3, val_rate=0.1, ano_known_rate=0.023):
     if dataset in ['Amazon']:
         abnormal_label_idx = normal_label_idx[: int(len(normal_label_idx) * 0.05)]  
     else:
-        abnormal_label_idx = normal_label_idx[: int(len(normal_label_idx) * 0.15)]  
-    return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, normal_label_idx, abnormal_label_idx, all_abnormal_label_idx
+        abnormal_label_idx = [i for i in normal_label_idx if i not in set(all_abnormal_label_idx)]
+        abnormal_label_idx = abnormal_label_idx[: int(len(normal_label_idx) * 0.15)]  
+    return adj, feat, ano_labels, all_idx, idx_train, idx_val, idx_test, ano_labels, str_ano_labels, attr_ano_labels, normal_label_idx, abnormal_label_idx, clip_abnormal_idx
 
 
 def adj_to_dgl_graph(adj):

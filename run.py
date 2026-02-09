@@ -142,7 +142,7 @@ xent = nn.CrossEntropyLoss()
 with tqdm(total=args.num_epoch) as pbar:
     pbar.set_description('Training')
     total_time = 0
-    with open("./log/" + args.dataset + str(args.num_epoch) + "_training_log.txt", "a") as f:
+    with open("./log/" + "normalcentric_abnormal0.0125" + args.dataset + str(args.num_epoch) + "_training_log.txt", "a") as f:
         for epoch in range(args.num_epoch):
             start_time = time.time()
             model.train()
