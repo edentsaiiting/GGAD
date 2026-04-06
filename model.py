@@ -35,157 +35,68 @@ class GCN(nn.Module):
         return self.act(out)
 
 
-class AvgReadout(nn.Module):
-    def __init__(self):
-        super(AvgReadout, self).__init__()
-
-    def forward(self, seq):
-        return torch.mean(seq, 1)
-
-
-class MaxReadout(nn.Module):
-    def __init__(self):
-        super(MaxReadout, self).__init__()
-
-    def forward(self, seq):
-        return torch.max(seq, 1).values
-
-
-class MinReadout(nn.Module):
-    def __init__(self):
-        super(MinReadout, self).__init__()
-
-    def forward(self, seq):
-        return torch.min(seq, 1).values
-
-
-class WSReadout(nn.Module):
-    def __init__(self):
-        super(WSReadout, self).__init__()
-
-    def forward(self, seq, query):
-        query = query.permute(0, 2, 1)
-        sim = torch.matmul(seq, query)
-        sim = F.softmax(sim, dim=1)
-        sim = sim.repeat(1, 1, 64)
-        out = torch.mul(seq, sim)
-        out = torch.sum(out, 1)
-        return out
-
-
-class Discriminator(nn.Module):
-    def __init__(self, n_h, negsamp_round):
-        super(Discriminator, self).__init__()
-        self.f_k = nn.Bilinear(n_h, n_h, 1)
-
-        for m in self.modules():
-            self.weights_init(m)
-
-        self.negsamp_round = negsamp_round
-
-    def weights_init(self, m):
-        if isinstance(m, nn.Bilinear):
-            torch.nn.init.xavier_uniform_(m.weight.data)
-            if m.bias is not None:
-                m.bias.data.fill_(0.0)
-
-    def forward(self, c, h_pl):
-        scs = []
-        # positive
-        scs.append(self.f_k(h_pl, c))
-
-        # negative
-        c_mi = c
-        for _ in range(self.negsamp_round):
-            c_mi = torch.cat((c_mi[-2:-1, :], c_mi[:-1, :]), 0)
-            scs.append(self.f_k(h_pl, c_mi))
-
-        logits = torch.cat(tuple(scs))
-
-        return logits
-
-
 class Model(nn.Module):
-    def __init__(self, n_in, n_h, activation, negsamp_round, readout):
+    def __init__(self, n_in, n_h, activation, negsamp_round, readout, use_gcn=True):
         super(Model, self).__init__()
-        self.read_mode = readout
-        self.gcn1 = GCN(n_in, n_h, activation)
-        self.gcn2 = GCN(n_h, n_h, activation)
-        self.gcn3 = GCN(n_h, n_h, activation)
-        self.fc1 = nn.Linear(n_h, int(n_h / 2), bias=False)
+        self.use_gcn = use_gcn
+        if use_gcn:
+            # Vanilla GGAD: two GCN message-passing layers → embedding dim = n_h
+            self.gcn1 = GCN(n_in, n_h, activation)
+            self.gcn2 = GCN(n_h, n_h, activation)
+            feat_dim = n_h
+        else:
+            # Diffusion detector: raw features fed directly → embedding dim = n_in
+            feat_dim = n_in
+        # Downstream classifier — input dim depends on encoder
+        self.fc1 = nn.Linear(feat_dim, int(n_h / 2), bias=False)
         self.fc2 = nn.Linear(int(n_h / 2), int(n_h / 4), bias=False)
         self.fc3 = nn.Linear(int(n_h / 4), 1, bias=False)
-        self.fc4 = nn.Linear(n_h, n_h, bias=False)
-        self.fc6 = nn.Linear(n_h, n_h, bias=False)
-        self.fc5 = nn.Linear(n_h, n_in, bias=False)
+        # Ego-centric neighbor aggregation transform — same dim as encoder output
+        self.fc4 = nn.Linear(feat_dim, feat_dim, bias=False)
         self.act = nn.ReLU()
-        if readout == 'max':
-            self.read = MaxReadout()
-        elif readout == 'min':
-            self.read = MinReadout()
-        elif readout == 'avg':
-            self.read = AvgReadout()
-        elif readout == 'weighted_sum':
-            self.read = WSReadout()
-
-        self.disc = Discriminator(n_h, negsamp_round)
 
     def forward(self, seq1, adj, sample_abnormal_idx, normal_idx, train_flag, args, sparse=False):
-        h_1 = self.gcn1(seq1, adj, sparse)
-        # emb = h_1
-        emb = self.gcn2(h_1, adj, sparse)
+        # seq1: [1, n_nodes, n_in],  adj: [1, n_nodes, n_nodes]
+        n_nodes = seq1.shape[1]
+        valid_abnormal_idx = [i for i in sample_abnormal_idx if 0 <= i < n_nodes]
+        valid_normal_idx   = [i for i in normal_idx           if 0 <= i < n_nodes]
 
-
-        emb_con = None
-        emb_combine = None
-        emb_abnormal = emb[:, sample_abnormal_idx, :]
-
-        noise = torch.randn(emb_abnormal.size()) * args.var + args.mean
-        emb_abnormal = emb_abnormal + noise
-        # emb_abnormal = emb_abnormal + noise.cuda()
-        if train_flag:
-            # Add noise into the attribute of sampled abnormal nodes
-            # degree = torch.sum(raw_adj[0, :, :], 0)[sample_abnormal_idx]
-            # neigh_adj = raw_adj[0, sample_abnormal_idx, :] / torch.unsqueeze(degree, 1)
-
-            neigh_adj = adj[0, sample_abnormal_idx, :]
-            # emb[0, sample_abnormal_idx, :] =self.act(torch.mm(neigh_adj, emb[0, :, :]))
-            # emb[0, sample_abnormal_idx, :] = self.fc4(emb[0, sample_abnormal_idx, :])
-
-            emb_con = torch.mm(neigh_adj, emb[0, :, :])
-            emb_con = self.act(self.fc4(emb_con))
-            # emb_con = self.act(self.fc6(emb_con))
-
-            emb_combine = torch.cat((emb[:, normal_idx, :], torch.unsqueeze(emb_con, 0)), 1)
-
-            # TODO ablation study add noise on the selected nodes
-
-            # std = 0.01
-            # mean = 0.02
-            # noise = torch.randn(emb[:, sample_abnormal_idx, :].size()) * std + mean
-            # emb_combine = torch.cat((emb[:, normal_idx, :], emb[:, sample_abnormal_idx, :] + noise), 1)
-
-            # TODO ablation study generate outlier from random noise
-            # std = 0.01
-            # mean = 0.02
-            # emb_con = torch.mm(neigh_adj, emb[0, :, :])
-            # noise = torch.randn(emb_con.size()) * std + mean
-            # emb_con = self.act(self.fc4(noise))
-            # emb_combine = torch.cat((emb[:, normal_idx, :], torch.unsqueeze(emb_con, 0)), 1)
-
-            f_1 = self.fc1(emb_combine)
-            f_1 = self.act(f_1)
-            f_2 = self.fc2(f_1)
-            f_2 = self.act(f_2)
-            f_3 = self.fc3(f_2)
-            # f_3 = torch.sigmoid(f_3)
-            emb[:, sample_abnormal_idx, :] = emb_con
+        if self.use_gcn:
+            # Graph-aware encoder: two GCN layers → [1, n_nodes, n_h]
+            h_1 = self.gcn1(seq1, adj, sparse)
+            emb = self.gcn2(h_1,  adj, sparse)
         else:
-            f_1 = self.fc1(emb)
-            f_1 = self.act(f_1)
-            f_2 = self.fc2(f_1)
-            f_2 = self.act(f_2)
-            f_3 = self.fc3(f_2)
-            # f_3 = torch.sigmoid(f_3)
+            # Diffusion detector: pass raw features through unchanged → [1, n_nodes, n_in]
+            emb = seq1
 
-        return emb, emb_combine, f_3, emb_con, emb_abnormal
+        if len(valid_abnormal_idx) == 0:
+            valid_abnormal_idx = [0]
+        emb_abnormal = emb[:, valid_abnormal_idx, :]   # [1, n_abn, n_h]
+        noise = torch.randn(emb_abnormal.size(), device=emb_abnormal.device) * args.var + args.mean
+        emb_abnormal = emb_abnormal + noise
+
+        if train_flag:
+            # Ego-centric reconstruction: aggregate neighbors of each abnormal node, then transform
+            neigh_adj = adj[0, valid_abnormal_idx, :]        # [n_abn, n_nodes]
+            emb_con   = torch.mm(neigh_adj, emb[0, :, :])   # [n_abn, n_h]
+            emb_con   = self.act(self.fc4(emb_con))          # [n_abn, n_h]
+
+            if len(valid_normal_idx) == 0:
+                valid_normal_idx = [0]
+            # emb_combine: [1, n_normal+n_abn, n_h] — labeled nodes only (following GGAD-git)
+            emb_combine = torch.cat((emb[:, valid_normal_idx, :], emb_con.unsqueeze(0)), dim=1)
+
+            # Logits from emb_combine only: [1, n_normal+n_abn, 1] (following GGAD-git)
+            logits = self.fc3(self.act(self.fc2(self.act(self.fc1(emb_combine)))))
+
+            # Replace abnormal slots in emb AFTER computing logits (following GGAD-git)
+            idx0 = torch.zeros(len(valid_abnormal_idx), dtype=torch.long, device=emb.device)
+            idx1 = torch.tensor(valid_abnormal_idx, dtype=torch.long, device=emb.device)
+            emb = emb.index_put((idx0, idx1), emb_con)
+        else:
+            emb_con     = None
+            emb_combine = None
+            # Inference: classify all N nodes
+            logits = self.fc3(self.act(self.fc2(self.act(self.fc1(emb)))))
+
+        return emb, emb_combine, logits, emb_con, emb_abnormal
