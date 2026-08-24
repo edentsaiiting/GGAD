@@ -1,26 +1,13 @@
 """
-Diffusion Model for Synthetic Abnormal Node Generation (Following DiffGAD)
-
-This module implements a diffusion model trained with EDMLoss (like DiffGAD).
-Key differences from previous version:
-1. Uses EDMLoss for training (weighted MSE reconstruction), not GGAD losses
-2. GGAD losses (margin, BCE, reconstruction) are for detector training ONLY
-3. Learns a prototype during training as weighted average
-        # Classifier-guided gradient guidance used in sampling, not training
+EDM-style diffusion over feature vectors (following DiffGAD): trained with
+EDMLoss (weighted MSE reconstruction); classifier-gradient guidance is
+applied at sampling time only. Backbone for iter_cotrain.py's generation
+steps via the AnomalyGenerator facade.
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 import math
-from typing import Optional, Tuple
-
-
-class SiLU(nn.Module):
-    """Swish activation function"""
-    def forward(self, x):
-        return x * torch.sigmoid(x)
 
 
 class PositionalEmbedding(nn.Module):
@@ -63,7 +50,7 @@ class MLPDiffusion(nn.Module):
             nn.Linear(dim_t, dim_t)
         )
 
-    def forward(self, x, noise_labels, proto=None, proto_alpha=None):
+    def forward(self, x, noise_labels):
         """Forward pass for unconditional diffusion denoiser."""
         emb = self.map_noise(noise_labels)
         emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape)
@@ -82,7 +69,7 @@ class Precond(nn.Module):
         self.sigma_data = sigma_data
         self.denoise_fn = denoise_fn
 
-    def forward(self, x, sigma, proto=None, proto_alpha=None):
+    def forward(self, x, sigma):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1)
 
@@ -110,18 +97,15 @@ class EDMLoss(nn.Module):
         self.P_mean = P_mean
         self.P_std = P_std
         self.sigma_data = sigma_data
-        self.cos = nn.CosineSimilarity(dim=1, eps=1e-6)
 
-    def forward(self, denoise_fn, data, proto=None, proto_alpha=None):
+    def forward(self, denoise_fn, data):
         """
         Compute diffusion loss during training
-        
+
         Args:
             denoise_fn: Preconditioned denoising function
             data: Input data (batch of embeddings)
-            proto: Prototype vector (for conditional diffusion)
-            proto_alpha: Weight for prototype conditioning
-        
+
         Returns:
             loss: Scalar loss value
             score: Per-sample reconstruction error
@@ -159,10 +143,10 @@ class DiffusionGenerator(nn.Module):
         self.denoise_fn_D = Precond(denoise_fn, hid_dim, sigma_data=sigma_data)
         self.loss_fn = EDMLoss(P_mean, P_std, sigma_data=sigma_data)
 
-    def forward(self, x, proto=None, proto_alpha=None):
+    def forward(self, x):
         """
         Compute loss and denoising
-        
+
         Returns:
             loss: Scalar loss
             score: Per-sample error
@@ -185,26 +169,26 @@ S_max = float('inf')
 S_noise = 1
 
 
-def sample_step(net, num_steps, i, t_cur, t_next, x_next, proto=None, proto_alpha=None):
+def sample_step(net, num_steps, i, t_cur, t_next, x_next):
     """Single sampling step (unconditional)"""
     x_cur = x_next
     gamma = min(S_churn / num_steps, math.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
     t_hat = net.round_sigma(t_cur + gamma * t_cur)
     x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(x_cur)
 
-    denoised = net(x_hat, t_hat, proto, proto_alpha).to(torch.float32)
+    denoised = net(x_hat, t_hat).to(torch.float32)
     d_cur = (x_hat - denoised) / t_hat
     x_next = x_hat + (t_next - t_hat) * d_cur
 
     if i < num_steps - 1:
-        denoised = net(x_next, t_next, proto, proto_alpha).to(torch.float32)
+        denoised = net(x_next, t_next).to(torch.float32)
         d_prime = (x_next - denoised) / t_next
         x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
     return x_next
 
 
-def sample_dm(net, noise, num_steps, proto=None, proto_alpha=None, z_init=None):
+def sample_dm(net, noise, num_steps, z_init=None):
     """Reverse diffusion sampling (unconditional or conditional).
 
     z_init: if provided, use as the starting latent (data + sigma_max noise) instead of
@@ -223,12 +207,12 @@ def sample_dm(net, noise, num_steps, proto=None, proto_alpha=None, z_init=None):
     z = z_init.to(torch.float32) if z_init is not None else noise.to(torch.float32) * t_steps[0]
     with torch.no_grad():
         for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
-            z = sample_step(net, num_steps, i, t_cur, t_next, z, proto, proto_alpha)
+            z = sample_step(net, num_steps, i, t_cur, t_next, z)
 
     return z
 
 
-def sample_step_guided(net, num_steps, i, t_cur, t_next, x_next, proto=None, proto_alpha=None,
+def sample_step_guided(net, num_steps, i, t_cur, t_next, x_next,
                        guidance_fn=None, guidance_scale=1.0, normal_embs=None):
     """Single sampling step with gradient guidance.
 
@@ -242,7 +226,7 @@ def sample_step_guided(net, num_steps, i, t_cur, t_next, x_next, proto=None, pro
     t_hat = net.round_sigma(t_cur + gamma * t_cur)
     x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(x_cur)
 
-    denoised = net(x_hat, t_hat, proto, proto_alpha).to(torch.float32)
+    denoised = net(x_hat, t_hat).to(torch.float32)
     d_cur = (x_hat - denoised) / t_hat
 
     if guidance_fn is not None and guidance_scale != 0:
@@ -259,7 +243,7 @@ def sample_step_guided(net, num_steps, i, t_cur, t_next, x_next, proto=None, pro
     x_next = x_hat + (t_next - t_hat) * d_cur
 
     if i < num_steps - 1:
-        denoised = net(x_next, t_next, proto, proto_alpha).to(torch.float32)
+        denoised = net(x_next, t_next).to(torch.float32)
         d_prime = (x_next - denoised) / t_next
 
         # Re-evaluate guidance at the predicted x_next so the Heun correction
@@ -279,7 +263,7 @@ def sample_step_guided(net, num_steps, i, t_cur, t_next, x_next, proto=None, pro
     return x_next
 
 
-def sample_dm_guided(net, noise, num_steps, proto=None, proto_alpha=None, guidance_fn=None,
+def sample_dm_guided(net, noise, num_steps, guidance_fn=None,
                      guidance_scale=1.0, normal_embs=None, z_init=None):
     """Reverse diffusion sampling with gradient guidance.
 
@@ -298,57 +282,8 @@ def sample_dm_guided(net, noise, num_steps, proto=None, proto_alpha=None, guidan
 
     z = z_init.to(torch.float32) if z_init is not None else noise.to(torch.float32) * t_steps[0]
     for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
-        z = sample_step_guided(net, num_steps, i, t_cur, t_next, z, proto, proto_alpha,
+        z = sample_step_guided(net, num_steps, i, t_cur, t_next, z,
                                guidance_fn, guidance_scale, normal_embs)
-
-    return z
-
-
-def sample_step_free(proto_net, free_net, num_steps, i, t_cur, t_next, x_next, 
-                     proto=None, proto_alpha=None, weight=None):
-    """Single sampling step with classifier-free guidance"""
-    x_cur = x_next
-    gamma = min(S_churn / num_steps, math.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
-    t_hat = proto_net.round_sigma(t_cur + gamma * t_cur)
-    x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(x_cur)
-
-    # Conditional and unconditional denoising
-    denoised_proto = proto_net(x_hat, t_hat, proto=proto, proto_alpha=proto_alpha).to(torch.float32)
-    denoised_free = free_net(x_hat, t_hat).to(torch.float32)
-
-    # Classifier-free guidance blend
-    d_cur_proto = (x_hat - denoised_proto) / t_hat
-    d_cur_free = (x_hat - denoised_free) / t_hat
-    d_cur = (1 + weight) * d_cur_free - weight * d_cur_proto
-    x_next = x_hat + (t_next - t_hat) * d_cur
-
-    if i < num_steps - 1:
-        denoised_proto = proto_net(x_next, t_next, proto=proto, proto_alpha=proto_alpha).to(torch.float32)
-        denoised_free = free_net(x_next, t_next).to(torch.float32)
-        d_prime_proto = (x_next - denoised_proto) / t_next
-        d_prime_free = (x_next - denoised_free) / t_next
-        d_prime = (1.0 + weight) * d_prime_free - weight * d_prime_proto
-        x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
-
-    return x_next
-
-
-def sample_dm_free(proto_net, free_net, noise, num_steps, proto=None, proto_alpha=None, weight=None):
-    """Reverse diffusion sampling with classifier-free guidance"""
-    step_indices = torch.arange(num_steps, dtype=torch.float32, device=noise.device)
-
-    sigma_min = max(SIGMA_MIN, free_net.sigma_min)
-    sigma_max = min(SIGMA_MAX, free_net.sigma_max)
-
-    t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (
-        sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
-    t_steps = torch.cat([free_net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])
-
-    z = noise.to(torch.float32) * t_steps[0]
-    with torch.no_grad():
-        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
-            z = sample_step_free(proto_net, free_net, num_steps, i, t_cur, t_next, z, 
-                                proto, proto_alpha=proto_alpha, weight=weight)
 
     return z
 
@@ -356,12 +291,6 @@ def sample_dm_free(proto_net, free_net, noise, num_steps, proto=None, proto_alph
 # ============================================================================
 # High-level interface for anomaly generation
 # ============================================================================
-
-def softmax_with_temperature(x, t=1.0):
-    """Softmax with temperature"""
-    x = x / t
-    return F.softmax(x, dim=0)
-
 
 class AnomalyGenerator:
     """
@@ -374,47 +303,30 @@ class AnomalyGenerator:
     3. GGAD losses used only for classifier guidance
     """
     
-    def __init__(self, embedding_dim=300, hidden_dim=512, lr=0.001, 
-                 num_gen_epochs=50, proto_alpha=0.5, device='cpu'):
+    def __init__(self, embedding_dim=300, hidden_dim=512, lr=0.001,
+                 num_gen_epochs=50, device='cpu'):
         """
         Args:
             embedding_dim: Dimension of node embeddings
             hidden_dim: Hidden dimension for denoising network
             lr: Learning rate
             num_gen_epochs: Number of training epochs
-            proto_alpha: Weight for prototype conditioning (in classifier-free guidance)
             device: 'cpu' or 'cuda'
         """
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
         self.lr = lr
         self.num_gen_epochs = num_gen_epochs
-        self.proto_alpha = proto_alpha
         self.device = device
-        
-        # Models
+
+        # Model / optimizer (built in initialize()).
         self.denoise_fn_unconditional = None
-        self.denoise_fn_conditional = None
         self.dm_unconditional = None
-        self.dm_conditional = None
-        
-        # Optimizers
         self.optimizer_unconditional = None
-        self.optimizer_conditional = None
         self.scheduler_unconditional = None
-        self.scheduler_conditional = None
-        
-        # Prototype (learned during training)
-        self.proto = None
-        
-        # Generated results
-        self.generated_nodes = None
-        
-        self.cos = nn.CosineSimilarity(dim=1, eps=1e-6)
 
     def initialize(self):
-        """Initialize both unconditional and conditional diffusion models"""
-        # Unconditional model
+        """Initialize the unconditional diffusion model"""
         self.denoise_fn_unconditional = MLPDiffusion(self.embedding_dim, dim_t=self.hidden_dim)
         self.dm_unconditional = DiffusionGenerator(
             self.denoise_fn_unconditional, 
@@ -431,23 +343,13 @@ class AnomalyGenerator:
         self.scheduler_unconditional = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer_unconditional, T_max=self.num_gen_epochs, eta_min=1e-6
         )
-        
-        # Conditional model (prototype-guided)
-        # In classifier-guided setting, we only need unconditional diffusion training.
-        self.denoise_fn_conditional = None
-        self.dm_conditional = None
-        self.optimizer_conditional = None
-        self.scheduler_conditional = None
 
     def train_unconditional(self, node_embeddings):
         """
         Train unconditional diffusion model on node embeddings
-        
+
         Args:
             node_embeddings: Input embeddings (num_nodes, embedding_dim)
-        
-        Returns:
-            prototype: Learned prototype vector
         """
         self.dm_unconditional.train()
 
@@ -472,13 +374,6 @@ class AnomalyGenerator:
 
             if epoch % 10 == 0:
                 print(f"  Unconditional Epoch {epoch}: Loss={epoch_loss / n_batches:.6f}")
-
-        self.proto = None
-        return None
-
-    def train_conditional(self, node_embeddings):
-        """No-op placeholder. We do not use conditional prototype training in classifier-guided setup."""
-        return
 
     def generate(self, num_samples, num_steps=50, guidance_fn=None, guidance_scale=0.0,
                  normal_embs=None, seed_embeddings=None):
@@ -521,7 +416,6 @@ class AnomalyGenerator:
         if guidance_fn is not None and guidance_scale != 0.0:
             generated = sample_dm_guided(
                 guided_net, noise, num_steps,
-                proto=None, proto_alpha=None,
                 guidance_fn=guidance_fn,
                 guidance_scale=guidance_scale,
                 normal_embs=normal_embs,
@@ -530,41 +424,7 @@ class AnomalyGenerator:
         else:
             generated = sample_dm(
                 guided_net, noise, num_steps,
-                proto=None, proto_alpha=None,
                 z_init=z_init,
             )
 
-        self.generated_nodes = generated.detach()
-        return self.generated_nodes
-
-    def transform_all(self, node_embeddings, num_steps=50):
-        """
-        Project all node embeddings through the Phase 1a trained denoiser (unguided).
-        Used at inference to create a consistent feature space with Phase 2 training.
-
-        Args:
-            node_embeddings: [N, feat_dim] raw node features (all N nodes).
-            num_steps: Number of reverse ODE steps.
-
-        Returns:
-            transformed: [N, feat_dim] projected embeddings.
-        """
-        self.dm_unconditional.eval()
-        net = self.dm_unconditional.denoise_fn_D
-
-        node_embeddings = node_embeddings.to(self.device).to(torch.float32)
-        step_indices = torch.arange(num_steps, dtype=torch.float32, device=self.device)
-        sigma_min_eff = max(SIGMA_MIN, net.sigma_min)
-        sigma_max_eff = min(SIGMA_MAX, net.sigma_max)
-        t_steps = (sigma_max_eff ** (1 / rho) + step_indices / (num_steps - 1) * (
-            sigma_min_eff ** (1 / rho) - sigma_max_eff ** (1 / rho))) ** rho
-        t_steps = torch.cat([net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])
-        sigma_max_val = t_steps[0]
-
-        z_init = node_embeddings + torch.randn_like(node_embeddings) * sigma_max_val
-        transformed = sample_dm(net, None, num_steps, z_init=z_init)
-        return transformed.detach()
-
-    def get_generated_nodes(self):
-        """Return generated nodes"""
-        return self.generated_nodes
+        return generated.detach()

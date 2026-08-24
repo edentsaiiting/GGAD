@@ -1,0 +1,14 @@
+{
+  "d_model": 80,
+  "num_layer": 4,
+  "nhead": 8,
+  "ffn_dim": null,
+  "max_hop": 5,
+  "dropout": 0.1,
+  "attention_dropout": 0.1,
+  "perturb_noise": 0.0,
+  "num_epoch": 50,
+  "lr": 1e-3,
+  "weight_decay": 1e-3,
+  "chunk_size": 8000
+}
