@@ -6,10 +6,10 @@ Every file in this directory falls into one of four buckets:
 
 1. **Upstream GGAD** — untouched files from the original repo (baselines, docs, the `src/` DGraph pipeline).
 2. **Upstream, modified by us** — 9 files, +1232/−260 lines total; the substance is in `run.py`, `model.py`, `utils.py`.
-3. **Created by us — method code & docs** — the encoder, diffusion, co-training modules and 3 markdown docs.
+3. **Created by us — method code & docs** — the encoder, diffusion, co-training modules and 4 markdown docs.
 4. **Created by us — experiment scripts** — ~80 shell scripts (2 reusable dispatchers, ~40 orchestrators, the rest one-off runners/mop-ups).
 
-> **⚠ Git state (fix before handover):** the current branch `GCN-FC-diff_emb_aug` only tracks ~20 of our files. **The method modules — `iter_cotrain.py`, `grpe_encoder.py`, `mha.py`, `diff_feat_aug.py`, `analysis.py` — plus all four docs and the unstaged edits to `run.py`/`model.py`/`utils.py` are untracked or uncommitted.** They exist only on this machine. Commit them first.
+> **Git state:** everything below is committed on branch **`Diffusion-co-training`** (renamed from `GCN-FC-diff_emb_aug`; commit `faf26f9 "init branch"`, pushed to `origin`). The old `GCN-FC-diff_emb_aug` ref still exists on origin and can be deleted — all its commits are contained in the new branch.
 >
 > **Cleanup done 2026-08-24:** regenerable data deleted (SPD cache 379 G, detector checkpoints 6.3 G, DGraph-Fin pkls 1.4 G), and **all 82 campaign shell scripts were moved out of the repo to `../GGAD_scripts_archive/`** (kept there for provenance; §5–6 below describe them in their archived location). `eval/visual.py` (empty placeholder) removed. **Final pass, same day:** result/artifact dirs deleted outright per the owner's call — `log/` (342 M campaign logs + results CSVs), `dumps/` (107 M probe dumps), `plt/`, both `__pycache__/`, `src/log/`, `src/pytorch_models/` — the authors receive conclusions through the docs and dashboards, not raw run outputs. `CORRECTIONS_SUMMARY.md` dropped from the doc set. Repo now ~320 MB, mostly `.git` history.
 >
@@ -24,14 +24,14 @@ Every file in this directory falls into one of four buckets:
 | `main`, `Dataset_exp` | pristine upstream mirror — zero files beyond `mala-lab/GGAD` |
 | `Normal` | small side branch (3 own commits): dgraph/normal-eval work in `src/` |
 | `Abnormal&Normal` | early experiment branch, ancestor of current |
-| **`GCN-FC-diff_emb_aug`** ← current | tip of tracked work (adds `diff_gen.py`, `loss_guided_diffusion.py`, `eval/`, early logs) + all the untracked work above |
+| **`Diffusion-co-training`** ← current (was `GCN-FC-diff_emb_aug`) | the handover branch: all method code, docs, and the cleaned pipeline, committed and pushed |
 
 ---
 
 ## 1. Upstream GGAD files (unmodified)
 
 ```
-README.md  framework.png  poster-NeurIPS2024.pdf
+framework.png  poster-NeurIPS2024.pdf   (README.md on this branch is now the run guide; the paper README lives on main)
 model_*.py + <name>.py pairs — competing-method baselines, each runnable standalone:
   aegis.py/model_AEGIS.py · anomalyDAE.py/model_AnomalyDAE.py · dominant.py/model_domaint.py
   gaan.py/model_gaan.py · ocgnn.py/model_ocgnn.py · tam.py/model_tam.py/utils_tam.py
@@ -44,7 +44,7 @@ src/ — upstream's separate DGraph-Fin pipeline (GraphSAGE/DOMINANT/AnomalyDAE 
 | file | what changed |
 |---|---|
 | `run.py` | The experiment front-end, **trimmed 2026-08-24 for handover** to the three surviving arms: vanilla D (default), GRPE encoder (`--use_grpe_encoder`), rolling co-training (`--use_iter_cotrain`, `--iter_skip_encoder` raw-rolling, `gen_max_iters`/`gen_target_ratio`/`gen_frac_schedule`/`gen_slice_frac`, diffusion knobs `diff_hidden_dim`/`gen_epochs`/`num_steps`/`loss_guidance_weight`); plus the **`--ano_known_rate` (akr) anchor-leak axis**, `--highpass_ref`, `--fc_only`, `DUMP_FEATS` hook, best-val checkpointing, memory-efficient row-wise margin, and the **leaked-abnormal label fix** (now inside `utils.load_mat`). ~30 experimental/trial flags were deleted across the cleanup passes (encoder search & early-stop, `--diag_only`, loss-placement variants, k-hop context, D+anchor arms, pseudo-init modes, both single-shot generation arms `--use_loss_guided_emb_gen`/`--use_feat_augmentor`, device/scheduler machinery); the full experimental version is preserved at `../GGAD_scripts_archive/run.py.experimental`. |
-| `model.py` | +125/−142. Detector rework: `use_gcn=False` raw-feature/FC-only path, high-pass `[h, h−ref]` head, GRPE/augmentor branch, `det_real_anchor_pos`/`det_rap_bce_only` (real anchors as BCE positives ± margin sees real geometry). |
+| `model.py` | Detector rework: `use_gcn=False` FC-only path, high-pass `[h, h−ref]` head, GRPE classifier branch (node-wise BCE head, no ego-centric recon) alongside the vanilla ego-centric branch. The experimental D+anchor arms were removed in the deep-clean. |
 | `utils.py` | `load_mat(ano_known_rate=…)` sizes the leaked-anchor pool and **returns already-repartitioned label sets** (9 values; the leaked-label fix lives here now); dataset path `../../Dataset/T/` overridable via `GGAD_DATA_ROOT`; fast `adj_to_dgl_graph`; `test_plotting()` (multi-round test eval, ROC-AUC / **AUC-PRC** / AP + PNGs under `plt/`). Dead plotting/pretrain helpers deleted in the deep-clean. |
 | `requirements.txt` / `requirements2.txt` | comment only / new alternate pinned env (py3.7, torch 1.6 + torch-geometric stack). |
 | `src/graphsage.py`, `src/utils.py`, `src/dgraph.yml` | 1-line env/path/epoch tweaks for the DGraph side-experiment. |
@@ -76,6 +76,7 @@ Dependency shape: `run.py` imports all of the above. Three arms remain: vanilla 
 
 ## 4. Docs we wrote — read in this order
 
+0. `README.md` — **how to run `run.py`**: setup, the three arms, every CLI flag with defaults, the named campaign configs as commands, outputs. **Start here to reproduce anything.**
 1. `GGAD_ARCHITECTURE.md` — ground-truth walkthrough of the stock detector (`model.py`): losses, shapes, forward paths. **Read first.**
 2. `QUICK_REFERENCE.md` — one-page cheat sheet for the diffusion rewrite + run commands.
 3. `DIFFUSION_IMPLEMENTATION_GUIDE.md` — full spec of the EDM pipeline (for whoever modifies `loss_guided_diffusion.py`).
